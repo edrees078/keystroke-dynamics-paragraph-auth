@@ -9,6 +9,12 @@ This repository includes the web application, feature extraction code, a **synth
 
 > **Scope:** The tested workflow used the paragraph task. A word typing route is present in the code, but the word verification experiment was not part of the reported participant tests. “Continuous authentication” describes the broader research topic; the current paragraph demo evaluates completed typing attempts, rather than continuously authenticating someone throughout an arbitrary session.
 
+## Project poster
+
+[View the public project poster (PDF)](docs/poster/paragraph-keystroke-verification-poster.pdf)
+
+The poster summarizes the fixed-paragraph prototype and its future goal of continuous authentication. Its ExtraTrees confusion matrix comes from an exploratory offline identification experiment; the paragraph verification prototype uses a Random Forest model.
+
 ## How the prototype works
 
 ```mermaid
