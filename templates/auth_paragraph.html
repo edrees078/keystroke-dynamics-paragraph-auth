@@ -1,0 +1,307 @@
+{% load static %}
+<!doctype html>
+<html lang="tr" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kimlik Doğrulama (Paragraf) – Keystroke</title>
+  <link rel="stylesheet" href="{% static 'css/auth_paragraph.css' %}">
+</head>
+
+<body oncontextmenu="return false">
+  <div class="wrap">
+    <div class="card">
+      <h1>Kimlik Tanıma (Paragraf)</h1>
+      <div class="muted">
+        Paragrafı yaz; sistem <b>model</b> kullanarak kimin yazdığını tahmin etsin.
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row">
+        <input id="testTag" class="input" placeholder="Test etiketi (opsiyonel)" autocomplete="off" />
+
+        <button id="start" class="btn primary" type="button">Testi Başlat</button>
+        <button id="reset" class="btn" type="button" disabled>Sıfırla</button>
+
+        <span id="status" class="pill">Beklemede</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="box">
+        <div class="muted small">Yazılması gereken paragraf</div>
+        <div class="target" id="targetText">
+Günlük hayatımızda hepimiz benzer ve basit şeyler yaşarız. Sabah uyanırız, kahvaltı yaparız, okula ya da işe gideriz. Akşam eve dönüp dinleniriz. Bu sade ve tanıdık anlar, aslında hayatımızın en büyük kısmını oluşturur.
+        </div>
+        <div class="muted small">
+          Kopyala–yapıştır yasak; lütfen normal şekilde yaz. Bitince <b>Enter</b>.
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row row-textarea">
+        <textarea
+          id="typing"
+          class="input textarea-input"
+          placeholder="Buraya paragrafı yaz..."
+          disabled
+          rows="8"
+          onpaste="return false"
+          ondrop="return false"></textarea>
+
+        <span class="pill attempt-pill" id="attemptPill">Deneme: 1 / 1</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div id="resultBox" class="result" style="display:none;">
+        <div class="result-title">Sonuç</div>
+
+        <div class="result-grid">
+          <div class="kv">
+            <div class="k">Tahmin Edilen Kullanıcı</div>
+            <div class="v" id="predName">—</div>
+          </div>
+          <div class="kv">
+            <div class="k">Skor (confidence)</div>
+            <div class="v" id="scoreVal">—</div>
+          </div>
+          <div class="kv">
+            <div class="k">Threshold</div>
+            <div class="v" id="thrVal">—</div>
+          </div>
+          <div class="kv">
+            <div class="k">Karar</div>
+            <div class="v" id="accVal">—</div>
+          </div>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div id="topkBox" class="topk" style="display:none;">
+          <div class="muted small">Top adaylar</div>
+          <div id="topkList" class="topk-list"></div>
+        </div>
+      </div>
+
+      <div class="muted small">
+        Not: Bu sayfa <b>active_paragraph</b> modelini kullanacak şekilde tasarlandı.
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ---- DOM ----
+  const testTagEl = document.getElementById("testTag");
+  const startBtn  = document.getElementById("start");
+  const resetBtn  = document.getElementById("reset");
+  const statusEl  = document.getElementById("status");
+  const typingEl  = document.getElementById("typing");
+
+  const resultBox = document.getElementById("resultBox");
+  const predNameEl = document.getElementById("predName");
+  const scoreValEl = document.getElementById("scoreVal");
+  const thrValEl   = document.getElementById("thrVal");
+  const accValEl   = document.getElementById("accVal");
+
+  const topkBox  = document.getElementById("topkBox");
+  const topkList = document.getElementById("topkList");
+
+  // ---- State ----
+  let attemptId = null;
+  let events = [];
+  let startedAt = null;
+  let finished = false;
+
+  function now(){ return performance.now(); }
+
+  function setStatus(msg){
+    if(statusEl) statusEl.textContent = msg;
+  }
+
+  function resetUI(){
+    attemptId = null;
+    events = [];
+    startedAt = null;
+    finished = false;
+
+    typingEl.value = "";
+    typingEl.disabled = true;
+
+    startBtn.disabled = false;
+    resetBtn.disabled = true;
+
+    if(resultBox) resultBox.style.display = "none";
+    if(topkBox) topkBox.style.display = "none";
+    setStatus("Beklemede");
+  }
+
+  function showResult(res){
+    if(!resultBox) return;
+
+    resultBox.style.display = "block";
+    predNameEl.textContent = res.pred_name ?? "—";
+    scoreValEl.textContent = (res.score ?? 0).toFixed(4);
+    thrValEl.textContent   = (res.threshold ?? 0).toFixed(4);
+    accValEl.textContent   = res.accepted ? "ACCEPTED ✅" : "REJECTED ❌";
+
+    if(Array.isArray(res.top_k) && res.top_k.length && topkBox && topkList){
+      topkBox.style.display = "block";
+      topkList.innerHTML = res.top_k.slice(0,3).map(x => {
+        const nm = x.name ?? x.id ?? "—";
+        const sc = (Number(x.score) || 0).toFixed(4);
+        return `<div class="topk-item">${nm} — ${sc}</div>`;
+      }).join("");
+    }else{
+      if(topkBox) topkBox.style.display = "none";
+    }
+  }
+
+  // منع Ctrl/⌘+V على مستوى الصفحة
+  window.addEventListener("keydown", (e)=>{
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v"){
+      e.preventDefault();
+    }
+  });
+
+  // ---- Buttons ----
+  resetBtn.addEventListener("click", resetUI);
+
+  startBtn.addEventListener("click", async ()=>{
+    try{
+      const tag = (testTagEl?.value || "").trim();
+      const aliasForLog = tag ? `AUTH_${tag}` : "AUTH";
+
+      // IMPORTANT: your backend start_attempt reads alias/mode from GET,
+      // but it does NOT require POST. We'll keep POST as you used.
+      const r = await fetch(`/api/attempt/start/?mode=paragraph&alias=${encodeURIComponent(aliasForLog)}`, {
+        method: "POST"
+      });
+      const j = await r.json().catch(()=> ({}));
+      if(!r.ok) throw new Error(j.error || "start_attempt_failed");
+
+      attemptId = j.id;
+      events = [];
+      startedAt = null;
+      finished = false;
+
+      typingEl.disabled = false;
+      typingEl.value = "";
+      typingEl.focus();
+
+      startBtn.disabled = true;
+      resetBtn.disabled = false;
+
+      setStatus("Test başladı - yaz ve Enter'a bas");
+      console.log("attemptId:", attemptId);
+    }catch(err){
+      console.error(err);
+      alert("Start error: " + err.message);
+      setStatus("Hata");
+    }
+  });
+
+  // ---- Capture events ----
+  ["keydown","keyup"].forEach(evt=>{
+    typingEl.addEventListener(evt, (e)=>{
+      if(!attemptId || finished) return;
+
+      // extra anti-paste
+      if((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v"){
+        e.preventDefault();
+        return;
+      }
+
+      if(!startedAt) startedAt = now();
+
+      events.push({
+        type: evt === "keydown" ? "down" : "up",
+        key: e.key,
+        code: e.code,
+        t: now()
+      });
+
+      if(evt === "keyup" && e.key === "Enter"){
+        e.preventDefault();
+        finalize();
+      }
+    });
+  });
+
+  async function finalize(){
+    if(finished || !attemptId) return;
+    finished = true;
+
+    typingEl.disabled = true;
+    setStatus("Veriler gönderiliyor...");
+
+    const tag = (testTagEl?.value || "").trim();
+
+    // 1) batch
+    const r1 = await fetch("/api/keystrokes/batch/", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        attempt_id: attemptId,
+        events,
+        test_tag: tag
+      })
+    });
+    const j1 = await r1.json().catch(()=> ({}));
+    if(!r1.ok){
+      alert("batch error: " + (j1.error || r1.status));
+      setStatus("Hata");
+      return;
+    }
+
+    // 2) finish
+    const r2 = await fetch("/api/attempt/finish/", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        attempt_id: attemptId,
+        started_at: startedAt,
+        finished_at: now(),
+        test_tag: tag
+      })
+    });
+    const j2 = await r2.json().catch(()=> ({}));
+    if(!r2.ok){
+      alert("finish error: " + (j2.error || r2.status));
+      setStatus("Hata");
+      return;
+    }
+
+    // 3) authenticate (identify)
+    setStatus("Kimlik tahmini yapılıyor...");
+
+    const r3 = await fetch("/api/authenticate/", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        attempt_id: attemptId,
+        test_type: "paragraph",
+        task: "identify",
+        recompute: true
+      })
+    });
+    const js = await r3.json().catch(()=> ({}));
+    if(!r3.ok || !js.ok){
+      alert("Auth error: " + (js.error || r3.status) + "\n" + (js.message || ""));
+      setStatus("Hata");
+      console.log(js);
+      return;
+    }
+
+    showResult(js.result);
+    setStatus("Tamamlandı ✅");
+    console.log("AUTH RESULT:", js.result);
+  }
+
+  // init
+  resetUI();
+  </script>
+</body>
+</html>

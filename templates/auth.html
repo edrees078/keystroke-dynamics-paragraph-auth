@@ -1,0 +1,18 @@
+<script>
+async function sendForAuth(features, claimedUser){
+  const res = await fetch("/api/authenticate/", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      features: features,        // Array بطول n_features
+      claimed_user: claimedUser  // مثلا من قائمة اختيار
+    })
+  });
+  constjs = await res.json();
+  if(!js.ok){ alert("Auth error: " + (js.error || "unknown")); return; }
+  const r = js.result;
+  // اعرض النتيجة للمستخدم:
+  document.getElementById("authResult").textContent =
+    `Pred: ${r.pred_name} | score=${r.score.toFixed(3)} | thr=${r.threshold ?? "—"} | accepted=${r.accepted}`;
+}
+</script>

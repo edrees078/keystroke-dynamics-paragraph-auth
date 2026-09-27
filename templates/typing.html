@@ -1,0 +1,182 @@
+{% load static %}
+<!doctype html>
+<html lang="tr" dir="ltr">
+<meta charset="utf-8" />
+<title>Yazım Oturumu – Keystroke</title>
+<link rel="stylesheet" href="{% static 'css/typing.css' %}">
+<body oncontextmenu="return false">
+  <div class="wrap">
+    <div class="card">
+      <h1>Sabit Yazım Oturumu</h1>
+      <div class="muted">Aşağıdaki kelimeyi CMU protokolüne benzer şekilde <b>50 kez</b> yaz.</div>
+
+      <div class="spacer"></div>
+
+      <div class="row">
+        <input id="alias" class="input" placeholder="Katılımcı adı (zorunlu)" autocomplete="off" />
+        <button id="start" class="btn primary">Oturumu Başlat</button>
+        <span id="status" class="pill">Beklemede</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="box">
+        <div class="muted small">Yazılması gereken kelime</div>
+        <div class="target">.tie5Roanl</div>
+        <div class="muted small">Kopyala–yapıştır yasak; lütfen normal şekilde yaz.</div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row">
+        <input id="typing" class="input" placeholder="Buraya yaz..." disabled
+               onpaste="return false" ondrop="return false" />
+        <button id="finish" class="btn" disabled>Denemeyi Bitir</button>
+        <button id="pause" class="btn" disabled>Durdur</button>
+        <span class="pill">Deneme: <span id="rep">1</span> / 50</span>
+      </div>
+
+      <div class="muted small">İpucu: <b>Enter</b> tuşu ile denemeyi kaydedebilirsin.</div>
+
+<script>
+const TARGET = ".tie5Roanl";
+const aliasEl = document.getElementById('alias');
+const startBtn = document.getElementById('start');
+const statusEl = document.getElementById('status');
+const typing = document.getElementById('typing');
+const finishBtn = document.getElementById('finish');
+const pauseBtn  = document.getElementById('pause');
+const repEl = document.getElementById('rep');
+
+let sessionIdx = 1;     // 1..8 (جلسات الكلمة)
+let rep = 1;            // 1..50
+let attemptId = null, started = null;
+let events = [];
+let paused = false;
+
+// منع Ctrl/⌘+V
+window.addEventListener('keydown', (e)=>{
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'v')) e.preventDefault();
+});
+
+function now(){ return performance.now(); }
+function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'pill ' + (cls||''); }
+
+startBtn.onclick = async ()=>{
+  const alias = aliasEl.value.trim();
+  if(!alias){
+    setStatus("Lütfen önce katılımcı adını girin", "warn");
+    aliasEl.focus();
+    return;
+  }
+
+  // 🔴 نحدد أن هذا اختبار الكلمة
+  const r = await fetch("/api/attempt/start/?mode=word&alias=" + encodeURIComponent(alias), {method:"POST"});
+  const j = await r.json(); attemptId = j.id;
+
+  typing.disabled = false;
+  finishBtn.disabled = false;
+  pauseBtn.disabled = false;
+  startBtn.disabled = true;
+  aliasEl.disabled = true;
+  paused = false;
+  pauseBtn.textContent = "Durdur";
+  setStatus("Oturum başladı", "ok");
+  typing.focus();
+};
+
+// التقاط الأحداث
+['keydown','keyup'].forEach(evt=>{
+  typing.addEventListener(evt, e=>{
+    if(!attemptId || paused) return;
+
+    // منع لصق
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='v') {
+      e.preventDefault();
+      return;
+    }
+
+    if(!started) started = now();
+
+    events.push({type: evt==='keydown'?'down':'up', key:e.key, code:e.code, t: now()});
+
+    if(evt==='keyup' && e.key === 'Enter'){
+      e.preventDefault();
+      setTimeout(()=> finishBtn.click(), 0);
+    }
+  });
+});
+
+// زر الإيقاف المؤقت
+pauseBtn.onclick = ()=>{
+  if(paused){
+    paused = false;
+    typing.disabled = false;
+    pauseBtn.textContent = "Durdur";
+    setStatus("Devam ediyor", "ok");
+    typing.focus();
+  } else {
+    paused = true;
+    typing.disabled = true;
+    pauseBtn.textContent = "Devam";
+    setStatus("Duraklatıldı", "warn");
+  }
+};
+
+// إنهاء/حفظ المحاولة
+finishBtn.onclick = async ()=>{
+  if(!attemptId) return;
+  if(paused){
+    setStatus("Önce devam edip sonra kaydedin", "warn");
+    return;
+  }
+
+  await fetch("/api/keystrokes/batch/", {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      events,
+      alias: aliasEl.value.trim(),
+      session_index: sessionIdx,
+      rep
+    })
+  });
+
+  await fetch("/api/attempt/finish/", {
+    method:"POST",
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      started_at: started,
+      finished_at: performance.now(),
+      alias: aliasEl.value.trim(),
+      session_index: sessionIdx,
+      rep
+    })
+  });
+
+  // إعادة الضبط للمحاولة التالية
+  events = [];
+  started = null;
+  typing.value = "";
+  rep++;
+
+  if(rep <= 50){
+    repEl.textContent = rep;
+    // 🔴 هنا أيضاً نحتاج mode=word
+    const r = await fetch("/api/attempt/start/?mode=word&alias=" + encodeURIComponent(aliasEl.value.trim()), {method:"POST"});
+    const j = await r.json(); attemptId = j.id;
+    typing.focus();
+  } else {
+    typing.disabled = true;
+    finishBtn.disabled = true;
+    pauseBtn.disabled = true;
+    setStatus("Oturum tamamlandı", "ok");
+    alert("Tebrikler! 50 deneme bitti.");
+  }
+};
+</script>
+
+</body>
+</html>

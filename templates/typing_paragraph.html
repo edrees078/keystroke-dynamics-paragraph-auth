@@ -1,0 +1,171 @@
+{% load static %}
+<!doctype html>
+<html lang="tr" dir="ltr">
+<meta charset="utf-8" />
+<title>Paragraf Yazım Oturumu – Keystroke</title>
+
+<!-- 🔹 New CSS just for paragraph test -->
+<link rel="stylesheet" href="{% static 'css/typing_paragraph.css' %}">
+
+<body oncontextmenu="return false">
+  <div class="wrap">
+    <div class="card">
+      <h1>Paragraf Yazım Oturumu</h1>
+      <div class="muted">
+        Aşağıdaki paragrafı <b>yalnızca bir kez</b> aynı şekilde yaz.
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row">
+        <input id="alias" class="input" placeholder="Katılımcı adı (zorunlu)" autocomplete="off" />
+        <button id="start" class="btn primary">Oturumu Başlat</button>
+        <span id="status" class="pill">Beklemede</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="box">
+        <div class="muted small">Yazılması gereken paragraf</div>
+        <div class="target">
+Günlük hayatımızda hepimiz benzer ve basit şeyler yaşarız. Sabah uyanırız, kahvaltı yaparız, okula ya da işe gideriz. Akşam eve dönüp dinleniriz. Bu sade ve tanıdık anlar, aslında hayatımızın en büyük kısmını oluşturur.
+        </div>
+        <div class="muted small">
+          Kopyala–yapıştır yasak; lütfen normal şekilde yaz.
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <!-- 🔹 Bigger textarea row -->
+      <div class="row row-textarea">
+        <textarea id="typing" class="input textarea-input"
+                  placeholder="Buraya paragrafı yaz..."
+                  disabled
+                  rows="8"
+                  onpaste="return false"
+                  ondrop="return false"></textarea>
+
+        <span class="pill attempt-pill">Deneme: 1 / 1</span>
+      </div>
+
+      <div class="muted small">
+        İpucu: <b>Enter</b> tuşu ile denemeyi kaydedebilirsin.
+      </div>
+    </div>
+  </div>
+
+<script>
+const TARGET = "Günlük hayatımızda hepimiz benzer ve basit şeyler yaşarız. Sabah uyanırız, kahvaltı yaparız, okula ya da işe gideriz. Akşam eve dönüp dinleniriz. Bu sade ve tanıdık anlar, aslında hayatımızın en büyük kısmını oluşturur.";
+
+const aliasEl  = document.getElementById('alias');
+const startBtn = document.getElementById('start');
+const statusEl = document.getElementById('status');
+const typing   = document.getElementById('typing');
+
+let sessionIdx = 2;          // جلسة الفقرة
+let attemptId  = null;
+let started    = null;
+let events     = [];
+let finished   = false;
+
+// منع Ctrl/⌘+V على مستوى الصفحة
+window.addEventListener('keydown', (e)=>{
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'v')) e.preventDefault();
+});
+
+function now(){ return performance.now(); }
+function setStatus(msg, cls){ statusEl.textContent = msg; statusEl.className = 'pill ' + (cls || ''); }
+
+startBtn.onclick = async ()=>{
+  const alias = aliasEl.value.trim();
+  if(!alias){
+    setStatus("Lütfen önce katılımcı adını girin", "warn");
+    aliasEl.focus();
+    return;
+  }
+
+  // 🔴 نخبر السيرفر أن هذه جلسة paragraf
+  const r = await fetch("/api/attempt/start/?mode=paragraph&alias=" + encodeURIComponent(alias), {method:"POST"});
+  const j = await r.json();
+  attemptId = j.id;
+
+  typing.disabled   = false;
+  startBtn.disabled = true;
+  aliasEl.disabled  = true;
+  finished = false;
+  events = [];
+  started = null;
+
+  setStatus("Oturum başladı", "ok");
+  typing.focus();
+};
+
+// التقاط الأحداث
+['keydown','keyup'].forEach(evt=>{
+  typing.addEventListener(evt, e=>{
+    if(!attemptId || finished) return;
+
+    // منع لصق داخل الـ textarea
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='v'){
+      e.preventDefault();
+      return;
+    }
+
+    if(!started) started = now();
+
+    events.push({
+      type: evt === 'keydown' ? 'down' : 'up',
+      key: e.key,
+      code: e.code,
+      t: now()
+    });
+
+    // إنهاء الجلسة بـ Enter
+    if(evt === 'keyup' && e.key === 'Enter'){
+      e.preventDefault();
+      submitAttempt();
+    }
+  });
+});
+
+async function submitAttempt(){
+  if(finished || !attemptId) return;
+  finished = true;
+
+  typing.disabled = true;
+  setStatus("Oturum tamamlandı", "ok");
+
+  const alias = aliasEl.value.trim();
+
+  await fetch("/api/keystrokes/batch/", {
+    method: "POST",
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      events,
+      alias,
+      session_index: sessionIdx,
+      rep: 1
+    })
+  });
+
+  await fetch("/api/attempt/finish/", {
+    method: "POST",
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      started_at: started,
+      finished_at: performance.now(),
+      alias,
+      session_index: sessionIdx,
+      rep: 1
+    })
+  });
+
+  alert("Teşekkürler! Paragraf yazımı tamamlandı.");
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,288 @@
+{% load static %}
+<!doctype html>
+<html lang="tr" dir="ltr">
+<head>
+  <meta charset="utf-8" />
+  <title>Kimlik Doğrulama (Paragraf) – Verification</title>
+  <link rel="stylesheet" href="{% static 'css/auth_paragraph_verify.css' %}">
+</head>
+
+<body oncontextmenu="return false">
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <div>
+          <h1>Kimlik Doğrulama (Paragraf)</h1>
+          <div class="muted">
+            <b>Verification</b>: Önce “Ben kimim?” yaz, sonra paragrafı yaz. Bitince <b>Enter</b>.
+          </div>
+        </div>
+        <span id="status" class="pill">Beklemede</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row">
+        <input id="claimedUser" class="input" placeholder="Ben kimim? (örn: idris veya 10)" autocomplete="off" />
+        <input id="testTag" class="input" placeholder="Test etiketi (opsiyonel)" autocomplete="off" />
+        <input id="margin" class="input small" type="number" step="0.01" min="0" value="0.00" title="margin" />
+        <button id="start" class="btn primary">Testi Başlat</button>
+        <button id="reset" class="btn" disabled>Sıfırla</button>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="box">
+        <div class="muted small">Yazılması gereken paragraf</div>
+        <div class="target" id="targetText">
+Günlük hayatımızda hepimiz benzer ve basit şeyler yaşarız. Sabah uyanırız, kahvaltı yaparız, okula ya da işe gideriz. Akşam eve dönüp dinleniriz. Bu sade ve tanıdık anlar, aslında hayatımızın en büyük kısmını oluşturur.
+        </div>
+        <div class="muted small">
+          Kopyala–yapıştır yasak; lütfen normal şekilde yaz. Bitince <b>Enter</b>.
+        </div>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row row-textarea">
+        <textarea id="typing" class="input textarea-input"
+                  placeholder="Buraya paragrafı yaz..."
+                  disabled
+                  rows="9"
+                  onpaste="return false"
+                  ondrop="return false"></textarea>
+
+        <span class="pill attempt-pill" id="attemptPill">Deneme: 1 / 1</span>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div id="resultBox" class="result" style="display:none;">
+        <div class="result-title">Sonuç</div>
+
+        <div class="result-grid">
+          <div class="kv">
+            <div class="k">Claimed (Ben)</div>
+            <div class="v" id="claimedName">—</div>
+          </div>
+          <div class="kv">
+            <div class="k">Score</div>
+            <div class="v" id="scoreVal">—</div>
+          </div>
+          <div class="kv">
+            <div class="k">Threshold</div>
+            <div class="v" id="thrVal">—</div>
+          </div>
+          <div class="kv">
+            <div class="k">Karar</div>
+            <div class="v" id="accVal">—</div>
+          </div>
+        </div>
+
+        <div class="spacer"></div>
+
+        <div id="debugLine" class="muted small" style="display:none;"></div>
+      </div>
+
+      <div class="muted small footer-note">
+        Not: Bu sayfa <b>active_paragraph</b> modelini kullanır (Verification).
+      </div>
+    </div>
+  </div>
+
+<script>
+const startBtn  = document.getElementById('start');
+const resetBtn  = document.getElementById('reset');
+const statusEl  = document.getElementById('status');
+const typing    = document.getElementById('typing');
+
+const claimedEl = document.getElementById('claimedUser');
+const testTagEl = document.getElementById('testTag');
+const marginEl  = document.getElementById('margin');
+
+const resultBox   = document.getElementById('resultBox');
+const claimedName = document.getElementById('claimedName');
+const scoreVal    = document.getElementById('scoreVal');
+const thrVal      = document.getElementById('thrVal');
+const accVal      = document.getElementById('accVal');
+const debugLine   = document.getElementById('debugLine');
+
+let attemptId = null;
+let started   = null;
+let events    = [];
+let finished  = false;
+
+const sessionIdx = 2;
+const rep = 1;
+
+// منع Ctrl/⌘+V على مستوى الصفحة
+window.addEventListener('keydown', (e)=>{
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'v')) e.preventDefault();
+});
+
+function now(){ return performance.now(); }
+
+function setStatus(msg, kind){
+  statusEl.textContent = msg;
+  statusEl.className = 'pill ' + (kind || '');
+}
+
+function resetUI(){
+  attemptId = null;
+  started   = null;
+  events    = [];
+  finished  = false;
+
+  typing.value = "";
+  typing.disabled = true;
+  startBtn.disabled = false;
+  resetBtn.disabled = true;
+
+  resultBox.style.display = "none";
+  debugLine.style.display = "none";
+  setStatus("Beklemede", "");
+}
+
+resetBtn.onclick = resetUI;
+
+startBtn.onclick = async ()=>{
+  const claimed = (claimedEl.value || "").trim();
+  if(!claimed){
+    alert("Lütfen önce 'Ben kimim?' alanına ad/ID gir.");
+    return;
+  }
+
+  const tag = (testTagEl.value || "").trim();
+  const aliasForLog = tag ? `AUTHV_${tag}` : "AUTHV";
+
+  // Start attempt (DB için)
+  const r = await fetch("/api/attempt/start/?mode=paragraph&alias=" + encodeURIComponent(aliasForLog), {method:"POST"});
+  const j = await r.json();
+
+  attemptId = j.id;
+  events = [];
+  started = null;
+  finished = false;
+
+  typing.disabled = false;
+  typing.value = "";
+  typing.focus();
+
+  startBtn.disabled = true;
+  resetBtn.disabled = false;
+
+  setStatus("Test başladı - yaz ve Enter'a bas", "ok");
+};
+
+['keydown','keyup'].forEach(evt=>{
+  typing.addEventListener(evt, e=>{
+    if(!attemptId || finished) return;
+
+    if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='v'){
+      e.preventDefault();
+      return;
+    }
+
+    if(!started) started = now();
+
+    events.push({
+      type: evt === 'keydown' ? 'down' : 'up',
+      key: e.key,
+      code: e.code,
+      t: now()
+    });
+
+    if(evt === 'keyup' && e.key === 'Enter'){
+      e.preventDefault();
+      submitAttempt();
+    }
+  });
+});
+
+async function submitAttempt(){
+  if(finished || !attemptId) return;
+  finished = true;
+
+  typing.disabled = true;
+  setStatus("Veriler gönderiliyor...", "warn");
+
+  const claimed = (claimedEl.value || "").trim();
+  const tag = (testTagEl.value || "").trim();
+  const aliasForLog = tag ? `AUTHV_${tag}` : "AUTHV";
+
+  const margin = Number(marginEl.value || 0);
+
+  // 1) send keystrokes
+  await fetch("/api/keystrokes/batch/", {
+    method: "POST",
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      events,
+      alias: aliasForLog,
+      session_index: sessionIdx,
+      rep
+    })
+  });
+
+  // 2) finish attempt
+  await fetch("/api/attempt/finish/", {
+    method: "POST",
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      started_at: started,
+      finished_at: now(),
+      alias: aliasForLog,
+      session_index: sessionIdx,
+      rep
+    })
+  });
+
+  // 3) authenticate (VERIFY)
+  setStatus("Doğrulama yapılıyor...", "warn");
+
+  const res = await fetch("/api/authenticate/", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({
+      attempt_id: attemptId,
+      test_type: "paragraph",
+      task: "verify",
+      claimed_user: claimed,
+      margin: margin,
+      recompute: true
+    })
+  });
+
+  const js = await res.json();
+  if(!js.ok){
+    setStatus("Hata: " + (js.error || "unknown"), "err");
+    alert("Auth error: " + (js.error || "unknown") + "\n" + (js.message || ""));
+    console.log(js);
+    return;
+  }
+
+  const r = js.result || {};
+  resultBox.style.display = "block";
+
+  claimedName.textContent = r.claimed_name ?? claimed ?? "—";
+  scoreVal.textContent = (r.score != null) ? Number(r.score).toFixed(4) : "—";
+  thrVal.textContent   = (r.threshold != null) ? Number(r.threshold).toFixed(4) : "—";
+
+  const ok = (r.accepted === true);
+  accVal.textContent = ok ? "ACCEPTED ✅" : "REJECTED ❌";
+  accVal.className = "v " + (ok ? "okText" : "errText");
+
+  if(r.best_other != null){
+    debugLine.style.display = "block";
+    debugLine.textContent =
+      `debug: best_other=${Number(r.best_other).toFixed(4)} | margin=${Number(r.margin ?? 0).toFixed(4)}`;
+  }
+
+  setStatus("Tamamlandı", ok ? "ok" : "err");
+}
+</script>
+
+</body>
+</html>
