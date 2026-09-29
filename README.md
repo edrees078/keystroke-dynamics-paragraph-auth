@@ -41,6 +41,7 @@ The browser collects key event data; `collector/views.py` processes attempts and
 | `training/preprocess_paragraph.py` | Historical paragraph preprocessing script; review its inputs and options before running it on newly collected data. |
 | `training/preprocess_features.py` | Separate preprocessing path for the word task. |
 | `notebooks/train_paragraph_rf_public.ipynb` | Output-free training example using the synthetic paragraph CSV. |
+| `notebooks/compare_paragraph_classifiers_public.ipynb` | Output-free comparison of 16 classifier choices using the synthetic paragraph CSV; 14 can run with the example's limited training data. |
 | `sample_data/raw/aggregated_paragraph.csv` | Invented, aggregated feature rows for 15 example identities and two sessions per identity. These are **not** original key event logs. |
 | `sample_data/processed/processed_paragraph.csv` | Invented example after filling missing features and scaling with session 1 parameters. Provided to illustrate the file layout; the public notebook reads the aggregated CSV instead. |
 | `sample_data/README.txt` | Notes on the bundled example data. |
@@ -89,6 +90,12 @@ If that command reports that `notebook` is missing, install or launch your chose
 5. Saves `model.pkl`, `scaler.pkl`, `label_encoder.pkl`, and `meta.json` under ignored `training/models/candidates/<timestamp>/`.
 
 The example data were generated independently of participant measurements. A good score on them would not demonstrate real-world accuracy. The notebook **does not** create validated per-person thresholds, deploy a candidate to `active_paragraph/`, or enroll a new user automatically. Do not use models trained on the synthetic CSV to authenticate people.
+
+### Classifier comparison example
+
+[Open the public classifier comparison notebook](notebooks/compare_paragraph_classifiers_public.ipynb). It reads `sample_data/raw/aggregated_paragraph.csv` and compares 16 classifier choices using session-held-out identification accuracy and macro F1. The example contains 501 timing features; `subject`, `sessionIndex`, and `rep` are not model features. LDA and QDA are marked as skipped because each training fold has only one record per person.
+
+The bundled data are synthetic. These scores do not reproduce the historical ExtraTrees and Random Forest percentages, evaluate the active Django model, or provide validated verification FAR, FRR, EER, or thresholds.
 
 ### Reproducing the private research workflow
 
