@@ -12,6 +12,7 @@ data/
 *.ipynb
 
 !notebooks/train_paragraph_rf_public.ipynb
+!notebooks/compare_paragraph_classifiers_public.ipynb
 
 /training/experiments/
 /training/models/
